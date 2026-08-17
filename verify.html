@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Verify Sales — Northline Insurance Group</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .review-card {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .review-card { grid-template-columns: 1fr; }
+  }
+  .doc-preview {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--page);
+    height: 360px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .doc-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .doc-preview iframe { width: 100%; height: 100%; border: none; }
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+  }
+  .field-grid .full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="brand" id="brandName">Northline Insurance Group</div>
+  <nav>
+    <a href="index.html">Log a Sale</a>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="verify.html" class="active">Verify</a>
+    <a href="report.html">Daily Report</a>
+    <a href="settings.html">Settings</a>
+  </nav>
+</header>
+
+<div class="container" style="max-width:900px;">
+  <div class="card">
+    <h1>Verify submitted sales</h1>
+    <p class="subtle">Check each attached policy application against what the agent entered, correct anything that's off, then verify it — or flag it if something doesn't add up.</p>
+  </div>
+
+  <div id="pendingList"></div>
+
+  <div class="card">
+    <h2>Recently reviewed</h2>
+    <div id="reviewedList"></div>
+  </div>
+</div>
+
+<script src="app-common.js"></script>
+<script>
+let config = {};
+
+function fileIsImage(name) {
+  return /\.(png|jpe?g|heic|heif)$/i.test(name || '');
+}
+function fileIsPdf(name) {
+  return /\.pdf$/i.test(name || '');
+}
+
+function docPreview(sale) {
+  const url = `/api/sales/${sale.id}/document`;
+  if (fileIsImage(sale.documentOriginalName)) {
+    return `<div class="doc-preview"><img src="${url}" alt="Attached document" /></div>`;
+  }
+  if (fileIsPdf(sale.documentOriginalName)) {
+    return `<div class="doc-preview"><iframe src="${url}"></iframe></div>`;
+  }
+  return `<div class="doc-preview"><a href="${url}" target="_blank" class="secondary" style="padding:8px 14px; border:1px solid var(--baseline); border-radius:8px; text-decoration:none;">Open attached file</a></div>`;
+}
+
+function carrierOptions(selected) {
+  return (config.carriers || []).map(c =>
+    `<option value="${c.name}" ${c.name === selected ? 'selected' : ''}>${c.name}</option>`
+  ).join('');
+}
+
+function lineOptions(carrierName, selected) {
+  const carrier = (config.carriers || []).find(c => c.name === carrierName);
+  const lines = (carrier && Array.isArray(carrier.lines)) ? carrier.lines.map(l => l.name) : [];
+  if (selected && !lines.includes(selected)) lines.push(selected);
+  return lines.map(name =>
+    `<option value="${name}" ${name === selected ? 'selected' : ''}>${name}</option>`
+  ).join('');
+}
+
+async function loadLists() {
+  const [pending, all] = await Promise.all([
+    fetch('/api/sales?status=pending').then(r => r.json()),
+    fetch('/api/sales').then(r => r.json())
+  ]);
+  renderPending(pending);
+  renderReviewed(all.filter(s => s.verificationStatus !== 'pending').slice(0, 20));
+}
+
+function renderPending(sales) {
+  const wrap = document.getElementById('pendingList');
+  if (!sales.length) {
+    wrap.innerHTML = '<div class="card"><div class="empty-state">Nothing waiting on review — you\'re all caught up.</div></div>';
+    return;
+  }
+  wrap.innerHTML = sales.map(sale => `
+    <div class="card" id="card-${sale.id}">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div>
+          <strong>${sale.agent}</strong> — logged ${new Date(sale.dateLogged).toLocaleString()}
+        </div>
+        <span class="status-pill status-pending">Pending</span>
+      </div>
+      <div class="review-card">
+        ${docPreview(sale)}
+        <div>
+          <div class="field-grid">
+            <div class="full">
+              <label>Carrier</label>
+              <select class="f-carrier" onchange="onCarrierChange('${sale.id}')">${carrierOptions(sale.carrier)}</select>
+            </div>
+            <div>
+              <label>Line of business</label>
+              <select class="f-line">${lineOptions(sale.carrier, sale.policyType)}</select>
+            </div>
+            <div>
+              <label>New or renewal</label>
+              <select class="f-newrenew">
+                <option value="new" ${sale.newOrRenewal !== 'renewal' ? 'selected' : ''}>New business</option>
+                <option value="renewal" ${sale.newOrRenewal === 'renewal' ? 'selected' : ''}>Renewal</option>
+              </select>
+            </div>
+            <div>
+              <label>Premium ($)</label>
+              <input type="number" class="f-premium" value="${sale.premium}" step="0.01" />
+            </div>
+            <div>
+              <label>Date sold</label>
+              <input type="text" value="${sale.dateSold}" disabled />
+            </div>
+            <div class="full">
+              <label style="display:flex; align-items:center; gap:8px; margin:14px 0 6px;">
+                <input type="checkbox" class="f-bundled" style="width:auto;" ${sale.bundled ? 'checked' : ''} />
+                Bundled with another line
+              </label>
+              <label style="font-weight:400;">Client: ${sale.clientName || '—'}</label>
+            </div>
+            <div class="full">
+              <label>Reviewer notes <span style="font-weight:400;">(optional, required if flagging)</span></label>
+              <textarea class="f-notes" rows="2" placeholder="e.g. premium on the dec page is actually $1,340"></textarea>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="primary" style="margin-top:0; background:var(--success);" onclick="review('${sale.id}','verify')">Verify</button>
+            <button class="secondary" style="border-color:#b02a2a; color:#b02a2a;" onclick="review('${sale.id}','flag')">Flag mismatch</button>
+          </div>
+          <div class="msg" id="msg-${sale.id}"></div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderReviewed(sales) {
+  const wrap = document.getElementById('reviewedList');
+  if (!sales.length) {
+    wrap.innerHTML = '<div class="empty-state">Nothing reviewed yet.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>Date sold</th><th>Agent</th><th>Carrier</th><th class="num">Premium</th><th>Status</th><th>Notes</th><th></th>
+  </tr></thead><tbody>`;
+  sales.forEach(s => {
+    const pillClass = s.verificationStatus === 'verified' ? 'status-verified' : 'status-flagged';
+    const label = s.verificationStatus === 'verified' ? 'Verified' : 'Flagged';
+    html += `<tr>
+      <td>${s.dateSold}</td>
+      <td>${s.agent}</td>
+      <td>${s.carrier}</td>
+      <td class="num">${fmtMoneyPrecise(s.premium)}</td>
+      <td><span class="status-pill ${pillClass}">${label}</span></td>
+      <td>${s.verificationNotes || '—'}</td>
+      <td><a href="/api/sales/${s.id}/document" target="_blank" class="icon-btn" style="color:var(--series-1);" title="View document">View doc</a></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function onCarrierChange(id) {
+  const card = document.getElementById(`card-${id}`);
+  const carrier = card.querySelector('.f-carrier').value;
+  card.querySelector('.f-line').innerHTML = lineOptions(carrier, null);
+}
+
+async function review(id, action) {
+  const card = document.getElementById(`card-${id}`);
+  const msg = document.getElementById(`msg-${id}`);
+  const carrier = card.querySelector('.f-carrier').value;
+  const lineOfBusiness = card.querySelector('.f-line').value;
+  const newOrRenewal = card.querySelector('.f-newrenew').value;
+  const bundled = card.querySelector('.f-bundled').checked;
+  const premium = card.querySelector('.f-premium').value;
+  const notes = card.querySelector('.f-notes').value.trim();
+
+  if (action === 'flag' && !notes) {
+    msg.className = 'msg error';
+    msg.textContent = 'Add a note explaining the mismatch before flagging.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/sales/${id}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action, notes,
+        correctedCarrier: carrier,
+        correctedPremium: premium,
+        correctedPolicyType: lineOfBusiness,
+        correctedNewOrRenewal: newOrRenewal,
+        correctedBundled: bundled
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save review');
+    await loadLists();
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = err.message;
+  }
+}
+
+(async () => {
+  config = await fetchConfig();
+  document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
+  await loadLists();
+})();
+</script>
+</body>
+</html>

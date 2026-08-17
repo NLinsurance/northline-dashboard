@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Report — Northline Insurance Group</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="app-header">
+  <div class="brand" id="brandName">Northline Insurance Group</div>
+  <nav>
+    <a href="index.html">Log a Sale</a>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="verify.html">Verify</a>
+    <a href="report.html" class="active">Daily Report</a>
+    <a href="settings.html">Settings</a>
+  </nav>
+</header>
+
+<div class="container" style="max-width:700px;">
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:6px;">
+      <h1 style="margin:0;">Daily report</h1>
+      <div class="toggle-group" id="metricToggle">
+        <button class="toggle-btn active" data-mode="revenue">Revenue</button>
+        <button class="toggle-btn" data-mode="premium">Premium</button>
+      </div>
+    </div>
+    <p class="subtle">A ready-to-paste summary for your morning or end-of-day team update — copy it into email, Slack, or text.</p>
+
+    <div class="report-text" id="reportText">Loading…</div>
+
+    <div style="display:flex; gap:10px; margin-top:16px;">
+      <button class="secondary" id="copyBtn">Copy to clipboard</button>
+      <button class="secondary" id="refreshBtn">Refresh</button>
+    </div>
+    <div class="msg" id="copyMsg"></div>
+  </div>
+</div>
+
+<script src="app-common.js"></script>
+<script>
+let metricMode = 'revenue';
+
+async function loadReport() {
+  const el = document.getElementById('reportText');
+  el.textContent = 'Loading…';
+  const res = await fetch(`/api/report?today=${todayLocalISO()}&mode=${metricMode}`);
+  const data = await res.json();
+  el.textContent = data.text;
+}
+
+document.getElementById('metricToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.toggle-btn');
+  if (!btn) return;
+  metricMode = btn.getAttribute('data-mode');
+  document.querySelectorAll('#metricToggle .toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
+  loadReport();
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadReport);
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  const text = document.getElementById('reportText').textContent;
+  const msg = document.getElementById('copyMsg');
+  try {
+    await navigator.clipboard.writeText(text);
+    msg.className = 'msg success';
+    msg.textContent = 'Copied! Paste it into email, Slack, or a text to your team.';
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = 'Could not copy automatically — select the text above and copy manually.';
+  }
+});
+
+(async () => {
+  const config = await fetchConfig();
+  document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
+  await loadReport();
+})();
+</script>
+</body>
+</html>

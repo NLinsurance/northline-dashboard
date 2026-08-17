@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Settings — Northline Insurance Group</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .carrier-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 14px;
+    background: var(--page);
+  }
+  .carrier-card-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .carrier-card-header input.carrier-name {
+    flex: 1;
+    font-weight: 700;
+  }
+  .carrier-note {
+    margin-top: 8px;
+  }
+  .carrier-note textarea {
+    min-height: 44px;
+    font-size: 12px;
+  }
+  .line-table-head, .line-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr 24px;
+    gap: 6px;
+    align-items: center;
+    margin-top: 6px;
+  }
+  .line-table-head {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 14px;
+  }
+  .line-row input {
+    padding: 7px 8px;
+    font-size: 13px;
+  }
+  .lines-wrap { margin-top: 4px; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="brand" id="brandName">Northline Insurance Group</div>
+  <nav>
+    <a href="index.html">Log a Sale</a>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="verify.html">Verify</a>
+    <a href="report.html">Daily Report</a>
+    <a href="settings.html" class="active">Settings</a>
+  </nav>
+</header>
+
+<div class="container" style="max-width:700px;">
+  <div class="card">
+    <h1>Agency settings</h1>
+    <p class="subtle">Manage carriers, commission rates, agents, and the shared PIN. Changes require the current PIN.</p>
+
+    <label for="agencyName">Agency name</label>
+    <input type="text" id="agencyName" />
+
+    <label>Carriers &amp; commission rates <span style="font-weight:400;">(per line of business, new vs. renewal, monoline vs. bundled)</span></label>
+    <div id="carrierRows"></div>
+    <button class="secondary" id="addCarrierBtn" type="button" style="margin-top:8px;">+ Add carrier</button>
+
+    <label style="margin-top:24px;">Agents</label>
+    <div id="agentRows"></div>
+    <button class="secondary" id="addAgentBtn" type="button" style="margin-top:8px;">+ Add agent</button>
+
+    <label style="margin-top:24px;">Company holidays <span style="font-weight:400;">(excluded from business-day pacing / run rate)</span></label>
+    <div id="holidayRows"></div>
+    <button class="secondary" id="addHolidayBtn" type="button" style="margin-top:8px;">+ Add holiday</button>
+
+    <label for="newPin" style="margin-top:24px;">Change shared PIN <span style="font-weight:400;">(leave blank to keep current)</span></label>
+    <input type="password" id="newPin" inputmode="numeric" />
+
+    <label for="currentPin">Current PIN <span style="font-weight:400;">(required to save any change)</span></label>
+    <input type="password" id="currentPin" inputmode="numeric" required />
+
+    <button class="primary" id="saveBtn">Save settings</button>
+    <div class="msg" id="settingsMsg"></div>
+  </div>
+
+  <div class="card">
+    <h1>Automatic Teams report</h1>
+    <p class="subtle">Posts the daily report straight into a Microsoft Teams channel at the times below. Requires a channel Workflow webhook URL — see the README for the 2-minute Teams-side setup.</p>
+
+    <label for="teamsWebhookUrl">Teams webhook URL <span id="webhookStatus" style="font-weight:400;"></span></label>
+    <input type="url" id="teamsWebhookUrl" placeholder="Leave blank to keep the current URL" />
+
+    <label>Send times <span style="font-weight:400;">(your local time)</span></label>
+    <div style="display:flex; gap:10px;">
+      <input type="time" id="reportTime1" style="flex:1;" />
+      <input type="time" id="reportTime2" style="flex:1;" />
+    </div>
+
+    <label for="reportTimezone">Timezone</label>
+    <select id="reportTimezone">
+      <option value="America/New_York">Eastern (America/New_York)</option>
+      <option value="America/Chicago">Central (America/Chicago)</option>
+      <option value="America/Denver">Mountain (America/Denver)</option>
+      <option value="America/Phoenix">Arizona (America/Phoenix, no DST)</option>
+      <option value="America/Los_Angeles">Pacific (America/Los_Angeles)</option>
+    </select>
+
+    <label for="reportModeSelect">Metric to lead with</label>
+    <select id="reportModeSelect">
+      <option value="revenue">Revenue</option>
+      <option value="premium">Premium</option>
+    </select>
+
+    <div style="display:flex; gap:10px; margin-top:20px;">
+      <button class="primary" id="saveTeamsBtn" style="margin-top:0;">Save Teams settings</button>
+      <button class="secondary" id="testTeamsBtn">Send test report now</button>
+    </div>
+    <div class="msg" id="teamsMsg"></div>
+  </div>
+</div>
+
+<script src="app-common.js"></script>
+<script>
+let config = {};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/"/g, '&quot;');
+}
+
+function lineRow(l = { name: '', monolineNewPct: 0, monolineRenewalPct: 0, bundledNewPct: 0, bundledRenewalPct: 0 }) {
+  const row = document.createElement('div');
+  row.className = 'line-row';
+  row.innerHTML = `
+    <input type="text" placeholder="Line (e.g. Auto)" value="${esc(l.name)}" class="line-name" />
+    <input type="number" value="${l.monolineNewPct ?? 0}" min="0" max="100" step="0.1" class="line-mono-new" title="Monoline New %" />
+    <input type="number" value="${l.monolineRenewalPct ?? 0}" min="0" max="100" step="0.1" class="line-mono-renew" title="Monoline Renewal %" />
+    <input type="number" value="${l.bundledNewPct ?? 0}" min="0" max="100" step="0.1" class="line-bundle-new" title="Bundled New %" />
+    <input type="number" value="${l.bundledRenewalPct ?? 0}" min="0" max="100" step="0.1" class="line-bundle-renew" title="Bundled Renewal %" />
+    <button class="icon-btn" title="Remove line">✕</button>
+  `;
+  row.querySelector('.icon-btn').addEventListener('click', () => row.remove());
+  return row;
+}
+
+function carrierCard(c = { name: '', notes: '', lines: [] }) {
+  const card = document.createElement('div');
+  card.className = 'carrier-card';
+  card.innerHTML = `
+    <div class="carrier-card-header">
+      <input type="text" placeholder="Carrier name" value="${esc(c.name)}" class="carrier-name" />
+      <button class="icon-btn" title="Remove carrier">✕ Remove carrier</button>
+    </div>
+    <div class="carrier-note">
+      <textarea class="carrier-notes" placeholder="Notes / caveats about this carrier's rates (optional)">${esc(c.notes)}</textarea>
+    </div>
+    <div class="line-table-head">
+      <div>Line of business</div><div>Mono New %</div><div>Mono Renew %</div><div>Bundle New %</div><div>Bundle Renew %</div><div></div>
+    </div>
+    <div class="lines-wrap"></div>
+    <button class="secondary add-line-btn" type="button" style="margin-top:10px; padding:6px 12px; font-size:12px;">+ Add line</button>
+  `;
+  const linesWrap = card.querySelector('.lines-wrap');
+  (c.lines && c.lines.length ? c.lines : [{ name: 'General', monolineNewPct: 0, monolineRenewalPct: 0, bundledNewPct: 0, bundledRenewalPct: 0 }])
+    .forEach(l => linesWrap.appendChild(lineRow(l)));
+  card.querySelector('.add-line-btn').addEventListener('click', () => linesWrap.appendChild(lineRow()));
+  card.querySelector('.carrier-card-header .icon-btn').addEventListener('click', () => card.remove());
+  return card;
+}
+
+function agentRow(name = '') {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:8px; margin-top:8px; align-items:center;';
+  row.innerHTML = `
+    <input type="text" placeholder="Agent name" value="${name}" class="agent-name" style="flex:1;" />
+    <button class="icon-btn" title="Remove">✕</button>
+  `;
+  row.querySelector('.icon-btn').addEventListener('click', () => row.remove());
+  return row;
+}
+
+function holidayRow(date = '') {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:8px; margin-top:8px; align-items:center;';
+  row.innerHTML = `
+    <input type="date" value="${date}" class="holiday-date" style="flex:1;" />
+    <button class="icon-btn" title="Remove">✕</button>
+  `;
+  row.querySelector('.icon-btn').addEventListener('click', () => row.remove());
+  return row;
+}
+
+async function init() {
+  config = await fetchConfig();
+  document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
+  document.getElementById('agencyName').value = config.agencyName || '';
+
+  const carrierWrap = document.getElementById('carrierRows');
+  (config.carriers || []).forEach(c => carrierWrap.appendChild(carrierCard(c)));
+
+  const agentWrap = document.getElementById('agentRows');
+  (config.agents || []).forEach(a => agentWrap.appendChild(agentRow(a)));
+
+  const holidayWrap = document.getElementById('holidayRows');
+  (config.holidays || []).forEach(h => holidayWrap.appendChild(holidayRow(h)));
+
+  document.getElementById('webhookStatus').textContent = config.teamsWebhookConfigured
+    ? '(currently set — leave blank to keep it)'
+    : '(not set yet)';
+  const times = config.reportTimes && config.reportTimes.length ? config.reportTimes : ['08:00', '17:00'];
+  document.getElementById('reportTime1').value = times[0] || '08:00';
+  document.getElementById('reportTime2').value = times[1] || '17:00';
+  document.getElementById('reportTimezone').value = config.reportTimezone || 'America/Chicago';
+  document.getElementById('reportModeSelect').value = config.reportMode || 'revenue';
+}
+
+document.getElementById('addCarrierBtn').addEventListener('click', () => {
+  document.getElementById('carrierRows').appendChild(carrierCard());
+});
+document.getElementById('addAgentBtn').addEventListener('click', () => {
+  document.getElementById('agentRows').appendChild(agentRow());
+});
+document.getElementById('addHolidayBtn').addEventListener('click', () => {
+  document.getElementById('holidayRows').appendChild(holidayRow());
+});
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('settingsMsg');
+  msg.className = 'msg';
+  const currentPin = document.getElementById('currentPin').value;
+  if (!currentPin) {
+    msg.className = 'msg error';
+    msg.textContent = 'Enter the current PIN to save changes.';
+    return;
+  }
+
+  const carriers = Array.from(document.querySelectorAll('#carrierRows > .carrier-card')).map(card => {
+    const lines = Array.from(card.querySelectorAll('.lines-wrap > .line-row')).map(row => ({
+      name: row.querySelector('.line-name').value.trim(),
+      monolineNewPct: Number(row.querySelector('.line-mono-new').value) || 0,
+      monolineRenewalPct: Number(row.querySelector('.line-mono-renew').value) || 0,
+      bundledNewPct: Number(row.querySelector('.line-bundle-new').value) || 0,
+      bundledRenewalPct: Number(row.querySelector('.line-bundle-renew').value) || 0
+    })).filter(l => l.name);
+    return {
+      name: card.querySelector('.carrier-name').value.trim(),
+      notes: card.querySelector('.carrier-notes').value.trim(),
+      lines
+    };
+  }).filter(c => c.name);
+
+  const agents = Array.from(document.querySelectorAll('#agentRows > div')).map(row =>
+    row.querySelector('.agent-name').value.trim()
+  ).filter(Boolean);
+
+  const holidays = Array.from(document.querySelectorAll('#holidayRows > div')).map(row =>
+    row.querySelector('.holiday-date').value
+  ).filter(Boolean);
+
+  const body = {
+    agencyName: document.getElementById('agencyName').value.trim(),
+    carriers,
+    agents,
+    holidays,
+    pin: currentPin
+  };
+  const newPin = document.getElementById('newPin').value.trim();
+  if (newPin) body.pin = newPin;
+
+  try {
+    const res = await fetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Pin': currentPin },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save settings');
+    msg.className = 'msg success';
+    msg.textContent = 'Settings saved.';
+    if (newPin) localStorage.setItem('northline_pin', newPin);
+    document.getElementById('newPin').value = '';
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = err.message;
+  }
+});
+
+document.getElementById('saveTeamsBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('teamsMsg');
+  msg.className = 'msg';
+  const currentPin = document.getElementById('currentPin').value;
+  if (!currentPin) {
+    msg.className = 'msg error';
+    msg.textContent = 'Enter the current PIN (in the section above) to save changes.';
+    return;
+  }
+
+  const t1 = document.getElementById('reportTime1').value || '08:00';
+  const t2 = document.getElementById('reportTime2').value || '17:00';
+  const body = {
+    reportTimes: [t1, t2],
+    reportTimezone: document.getElementById('reportTimezone').value,
+    reportMode: document.getElementById('reportModeSelect').value,
+    pin: currentPin
+  };
+  const webhookInput = document.getElementById('teamsWebhookUrl').value.trim();
+  if (webhookInput) body.teamsWebhookUrl = webhookInput;
+
+  try {
+    const res = await fetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Pin': currentPin },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save Teams settings');
+    msg.className = 'msg success';
+    msg.textContent = `Saved. Reports will post at ${t1} and ${t2} (${body.reportTimezone}).`;
+    document.getElementById('teamsWebhookUrl').value = '';
+    document.getElementById('webhookStatus').textContent = data.teamsWebhookConfigured
+      ? '(currently set — leave blank to keep it)'
+      : '(not set yet)';
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = err.message;
+  }
+});
+
+document.getElementById('testTeamsBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('teamsMsg');
+  msg.className = 'msg';
+  const currentPin = document.getElementById('currentPin').value;
+  if (!currentPin) {
+    msg.className = 'msg error';
+    msg.textContent = 'Enter the current PIN (in the section above) to send a test.';
+    return;
+  }
+  const btn = document.getElementById('testTeamsBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/send-teams-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Pin': currentPin },
+      body: JSON.stringify({ mode: document.getElementById('reportModeSelect').value })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not send test report');
+    if (data.skipped) {
+      msg.className = 'msg error';
+      msg.textContent = 'No Teams webhook URL saved yet — add one above first.';
+    } else {
+      msg.className = 'msg success';
+      msg.textContent = 'Test report sent — check your Teams channel.';
+    }
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = 'Could not send: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send test report now';
+  }
+});
+
+init();
+</script>
+</body>
+</html>

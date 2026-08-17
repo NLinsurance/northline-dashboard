@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard — Northline Insurance Group</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="app-header">
+  <div class="brand" id="brandName">Northline Insurance Group</div>
+  <nav>
+    <a href="index.html">Log a Sale</a>
+    <a href="dashboard.html" class="active">Dashboard</a>
+    <a href="verify.html">Verify</a>
+    <a href="report.html">Daily Report</a>
+    <a href="settings.html">Settings</a>
+  </nav>
+</header>
+
+<div class="container">
+  <div id="reviewBanner"></div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+      <h2 style="margin:0;">Pacing — today, month to date, and run rate</h2>
+      <div class="toggle-group" id="metricToggle">
+        <button class="toggle-btn active" data-mode="revenue">Revenue</button>
+        <button class="toggle-btn" data-mode="premium">Premium</button>
+      </div>
+    </div>
+    <p class="subtle" style="margin-bottom:16px;">Run rate paces month-to-date results across the business days (Mon–Fri) in <span id="pacingMonthLabel">this month</span> — <span id="pacingDaysLabel">–</span> completed so far.</p>
+
+    <div class="kpi-row" style="margin-bottom:20px;">
+      <div class="kpi-tile">
+        <div class="label" id="pacingTodayLabel">Revenue Today</div>
+        <div class="value" id="pacingToday">–</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="label" id="pacingMtdLabel">Revenue MTD</div>
+        <div class="value" id="pacingMtd">–</div>
+      </div>
+      <div class="kpi-tile" style="border-color: var(--series-1);">
+        <div class="label" id="pacingRunRateLabel">Run Rate</div>
+        <div class="value" id="pacingRunRate" style="color: var(--series-1);">–</div>
+      </div>
+    </div>
+
+    <h2>Producer performance</h2>
+    <div id="producerTableWrap"></div>
+  </div>
+
+  <div class="filters">
+    <div class="field">
+      <label for="rangePreset">Date range</label>
+      <select id="rangePreset">
+        <option value="today">Today</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="mtd">Month to date</option>
+        <option value="all">All time</option>
+        <option value="custom">Custom range…</option>
+      </select>
+    </div>
+    <div class="field" id="customStartField" style="display:none;">
+      <label for="startDate">From</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div class="field" id="customEndField" style="display:none;">
+      <label for="endDate">To</label>
+      <input type="date" id="endDate" />
+    </div>
+    <div class="field">
+      <label for="agentFilter">Agent</label>
+      <select id="agentFilter"><option value="">All agents</option></select>
+    </div>
+    <div class="field">
+      <label for="carrierFilter">Carrier</label>
+      <select id="carrierFilter"><option value="">All carriers</option></select>
+    </div>
+    <div class="field">
+      <button class="secondary" id="exportBtn">Export CSV</button>
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi-tile">
+      <div class="label">Policies sold</div>
+      <div class="value" id="kpiPolicies">–</div>
+    </div>
+    <div class="kpi-tile">
+      <div class="label">Total premium</div>
+      <div class="value" id="kpiPremium">–</div>
+    </div>
+    <div class="kpi-tile">
+      <div class="label">Agency revenue</div>
+      <div class="value" id="kpiRevenue">–</div>
+    </div>
+    <div class="kpi-tile">
+      <div class="label">Avg premium / policy</div>
+      <div class="value" id="kpiAvg">–</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Policies sold by day</h2>
+    <div id="dailyChart"></div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h2>Revenue by carrier</h2>
+      <div id="carrierBars"></div>
+    </div>
+    <div class="card">
+      <h2>Revenue by agent</h2>
+      <div id="agentBars"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent sales</h2>
+    <div id="salesTableWrap"></div>
+  </div>
+</div>
+
+<div class="chart-tooltip" id="tooltip"></div>
+
+<script src="app-common.js"></script>
+<script>
+let allSales = [];
+let config = {};
+let metricMode = 'revenue';
+let pacingData = null;
+
+async function loadPacing() {
+  const res = await fetch('/api/pacing?today=' + todayLocalISO());
+  pacingData = await res.json();
+  renderPacing();
+}
+
+function renderReviewBanner(agency) {
+  const el = document.getElementById('reviewBanner');
+  const pending = agency.pendingCount || 0;
+  const flagged = agency.flaggedCount || 0;
+  if (!pending && !flagged) { el.innerHTML = ''; return; }
+  const parts = [];
+  if (pending) parts.push(`${pending} sale${pending === 1 ? '' : 's'} awaiting verification`);
+  if (flagged) parts.push(`${flagged} flagged for a mismatch`);
+  el.innerHTML = `<div class="card" style="border-color:#eda100; background:#fff9ec; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <span>⚠️ ${parts.join(' · ')} — these are counted in the numbers below but haven't been checked against the submitted paperwork yet.</span>
+    <a href="verify.html" class="secondary" style="text-decoration:none; padding:8px 14px; border-radius:8px;">Review now</a>
+  </div>`;
+}
+
+function renderPacing() {
+  if (!pacingData) return;
+  const { agency, byAgent } = pacingData;
+  const label = metricMode === 'premium' ? 'Premium' : 'Revenue';
+
+  renderReviewBanner(agency);
+  document.getElementById('pacingTodayLabel').textContent = `${label} Today`;
+  document.getElementById('pacingMtdLabel').textContent = `${label} MTD`;
+  document.getElementById('pacingRunRateLabel').textContent = `Run Rate (${label.toLowerCase()})`;
+  document.getElementById('pacingToday').textContent = fmtMoney(agency.today[metricMode]);
+  document.getElementById('pacingMtd').textContent = fmtMoney(agency.mtd[metricMode]);
+  document.getElementById('pacingRunRate').textContent = fmtMoney(agency.runRate[metricMode]);
+  document.getElementById('pacingDaysLabel').textContent =
+    `${agency.businessDaysElapsed} of ${agency.businessDaysInMonth} business days`;
+  document.getElementById('pacingMonthLabel').textContent =
+    new Date(pacingData.today + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  const wrap = document.getElementById('producerTableWrap');
+  if (!byAgent.length) {
+    wrap.innerHTML = '<div class="empty-state">No producers configured yet — add agents in Settings.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>Producer</th>
+    <th class="num">Policies today</th>
+    <th class="num">${label} today</th>
+    <th class="num">${label} MTD</th>
+    <th class="num">Run rate</th>
+  </tr></thead><tbody>`;
+  byAgent.forEach(a => {
+    html += `<tr>
+      <td>${a.agent}</td>
+      <td class="num">${a.today.policies}</td>
+      <td class="num">${fmtMoney(a.today[metricMode])}</td>
+      <td class="num">${fmtMoney(a.mtd[metricMode])}</td>
+      <td class="num" style="font-weight:700; color:var(--series-1);">${fmtMoney(a.runRate[metricMode])}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+document.getElementById('metricToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.toggle-btn');
+  if (!btn) return;
+  metricMode = btn.getAttribute('data-mode');
+  document.querySelectorAll('#metricToggle .toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
+  renderPacing();
+});
+
+function computeRange() {
+  const preset = document.getElementById('rangePreset').value;
+  const today = todayLocalISO();
+  let start = null, end = today;
+  if (preset === 'today') { start = today; }
+  else if (preset === '7') { start = shiftDate(today, -6); }
+  else if (preset === '30') { start = shiftDate(today, -29); }
+  else if (preset === 'mtd') { start = today.slice(0,8) + '01'; }
+  else if (preset === 'all') { start = null; }
+  else if (preset === 'custom') {
+    start = document.getElementById('startDate').value || null;
+    end = document.getElementById('endDate').value || today;
+  }
+  return { start, end: preset === 'all' ? null : end };
+}
+
+function shiftDate(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function loadConfig() {
+  config = await fetchConfig();
+  document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
+  const agentSel = document.getElementById('agentFilter');
+  (config.agents || []).forEach(a => {
+    const opt = document.createElement('option'); opt.value = a; opt.textContent = a;
+    agentSel.appendChild(opt);
+  });
+  const carrierSel = document.getElementById('carrierFilter');
+  (config.carriers || []).forEach(c => {
+    const opt = document.createElement('option'); opt.value = c.name; opt.textContent = c.name;
+    carrierSel.appendChild(opt);
+  });
+}
+
+async function loadData() {
+  const { start, end } = computeRange();
+  const params = new URLSearchParams();
+  if (start) params.set('start', start);
+  if (end) params.set('end', end);
+  const agent = document.getElementById('agentFilter').value;
+  const carrier = document.getElementById('carrierFilter').value;
+  if (agent) params.set('agent', agent);
+  if (carrier) params.set('carrier', carrier);
+
+  const [sales, summary] = await Promise.all([
+    fetch('/api/sales?' + params.toString()).then(r => r.json()),
+    fetch('/api/summary?' + params.toString()).then(r => r.json())
+  ]);
+  allSales = sales;
+  renderKPIs(summary);
+  renderDailyChart(summary.dailySeries);
+  renderBars('carrierBars', summary.byCarrier);
+  renderBars('agentBars', summary.byAgent);
+  renderTable(sales);
+}
+
+function renderKPIs(summary) {
+  document.getElementById('kpiPolicies').textContent = summary.totalPolicies.toLocaleString();
+  document.getElementById('kpiPremium').textContent = fmtMoney(summary.totalPremium);
+  document.getElementById('kpiRevenue').textContent = fmtMoney(summary.totalRevenue);
+  const avg = summary.totalPolicies ? summary.totalPremium / summary.totalPolicies : 0;
+  document.getElementById('kpiAvg').textContent = fmtMoney(avg);
+}
+
+function renderBars(containerId, rows) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty-state">No sales logged for this range yet.</div>';
+    return;
+  }
+  const max = Math.max(...rows.map(r => r.revenue), 1);
+  rows.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    const pct = Math.max((r.revenue / max) * 100, 2);
+    row.innerHTML = `
+      <div class="name" title="${r.name}">${r.name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${SERIES_COLORS[i % SERIES_COLORS.length]}"></div></div>
+      <div class="val">${fmtMoney(r.revenue)}</div>
+    `;
+    el.appendChild(row);
+  });
+}
+
+function renderDailyChart(series) {
+  const el = document.getElementById('dailyChart');
+  const tooltip = document.getElementById('tooltip');
+  el.innerHTML = '';
+  if (!series.length) {
+    el.innerHTML = '<div class="empty-state">No sales logged for this range yet. Log one from the "Log a Sale" tab to see it appear here immediately.</div>';
+    return;
+  }
+  const width = el.clientWidth || 900;
+  const height = 220;
+  const padding = { top: 10, right: 10, bottom: 26, left: 10 };
+  const max = Math.max(...series.map(d => d.policies), 1);
+  const barGap = 6;
+  const n = series.length;
+  const plotWidth = width - padding.left - padding.right;
+  const barWidth = Math.max((plotWidth - barGap * (n - 1)) / n, 4);
+  const plotHeight = height - padding.top - padding.bottom;
+
+  let svg = `<svg width="${width}" height="${height}" style="overflow:visible;">`;
+  svg += `<line x1="${padding.left}" y1="${padding.top + plotHeight}" x2="${width - padding.right}" y2="${padding.top + plotHeight}" stroke="var(--baseline)" stroke-width="1" />`;
+
+  series.forEach((d, i) => {
+    const x = padding.left + i * (barWidth + barGap);
+    const barH = (d.policies / max) * (plotHeight - 6);
+    const y = padding.top + plotHeight - barH;
+    svg += `<rect data-i="${i}" x="${x}" y="${y}" width="${barWidth}" height="${Math.max(barH,2)}" rx="3" fill="var(--series-1)" style="cursor:pointer;" />`;
+    if (n <= 31) {
+      const label = d.date.slice(5);
+      svg += `<text x="${x + barWidth/2}" y="${height - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${label}</text>`;
+    }
+  });
+  svg += `</svg>`;
+  el.innerHTML = svg;
+
+  el.querySelectorAll('rect').forEach(rect => {
+    rect.addEventListener('mouseenter', (e) => {
+      const i = Number(rect.getAttribute('data-i'));
+      const d = series[i];
+      tooltip.style.display = 'block';
+      tooltip.innerHTML = `<strong>${d.date}</strong><br/>${d.policies} polic${d.policies === 1 ? 'y' : 'ies'} · ${fmtMoney(d.premium)} premium · ${fmtMoney(d.revenue)} revenue`;
+    });
+    rect.addEventListener('mousemove', (e) => {
+      tooltip.style.left = (e.pageX + 12) + 'px';
+      tooltip.style.top = (e.pageY - 10) + 'px';
+    });
+    rect.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+  });
+}
+
+function renderTable(sales) {
+  const wrap = document.getElementById('salesTableWrap');
+  if (!sales.length) {
+    wrap.innerHTML = '<div class="empty-state">No sales logged yet for this range.</div>';
+    return;
+  }
+  const statusPill = (status) => {
+    if (status === 'verified') return '<span class="status-pill status-verified">Verified</span>';
+    if (status === 'flagged') return '<span class="status-pill status-flagged">Flagged</span>';
+    return '<span class="status-pill status-pending">Pending</span>';
+  };
+  let html = `<table><thead><tr>
+    <th>Date sold</th><th>Agent</th><th>Carrier</th><th>Bundled</th><th>Type</th><th>Client</th>
+    <th class="num">Premium</th><th class="num">Comm %</th><th class="num">Revenue</th><th>Status</th><th></th><th></th>
+  </tr></thead><tbody>`;
+  sales.forEach(s => {
+    html += `<tr>
+      <td>${s.dateSold}</td>
+      <td>${s.agent}</td>
+      <td>${s.carrier}</td>
+      <td>${s.bundled ? 'Yes' : 'No'}</td>
+      <td>${s.policyType || '—'}</td>
+      <td>${s.clientName || '—'}</td>
+      <td class="num">${fmtMoneyPrecise(s.premium)}</td>
+      <td class="num">${s.commissionPct}%</td>
+      <td class="num">${fmtMoneyPrecise(s.revenue)}</td>
+      <td>${statusPill(s.verificationStatus)}</td>
+      <td>${s.documentFile ? `<a href="/api/sales/${s.id}/document" target="_blank" class="icon-btn" style="color:var(--series-1);">Doc</a>` : '—'}</td>
+      <td><button class="icon-btn" data-id="${s.id}" title="Delete">✕</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('button.icon-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pin = prompt('Enter PIN to delete this entry:');
+      if (!pin) return;
+      const res = await fetch('/api/sales/' + btn.getAttribute('data-id'), {
+        method: 'DELETE',
+        headers: { 'X-Pin': pin }
+      });
+      if (res.ok) loadData();
+      else alert('Incorrect PIN or error deleting.');
+    });
+  });
+}
+
+function exportCSV() {
+  if (!allSales.length) { alert('No sales in this range to export.'); return; }
+  const headers = ['dateSold','agent','carrier','policyType','clientName','policyNumber','premium','commissionPct','revenue'];
+  const rows = allSales.map(s => headers.map(h => JSON.stringify(s[h] ?? '')).join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `northline-sales-${todayLocalISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('rangePreset').addEventListener('change', () => {
+  const isCustom = document.getElementById('rangePreset').value === 'custom';
+  document.getElementById('customStartField').style.display = isCustom ? 'block' : 'none';
+  document.getElementById('customEndField').style.display = isCustom ? 'block' : 'none';
+  loadData();
+});
+document.getElementById('startDate').addEventListener('change', loadData);
+document.getElementById('endDate').addEventListener('change', loadData);
+document.getElementById('agentFilter').addEventListener('change', loadData);
+document.getElementById('carrierFilter').addEventListener('change', loadData);
+document.getElementById('exportBtn').addEventListener('click', exportCSV);
+window.addEventListener('resize', () => renderDailyChart(lastSeries || []));
+
+let lastSeries = [];
+const _origRenderDaily = renderDailyChart;
+renderDailyChart = function(series) { lastSeries = series; _origRenderDaily(series); };
+
+(async () => {
+  await loadConfig();
+  await Promise.all([loadData(), loadPacing()]);
+})();
+</script>
+</body>
+</html>

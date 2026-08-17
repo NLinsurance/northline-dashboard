@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log a Sale — Northline Insurance Group</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="app-header">
+  <div class="brand" id="brandName">Northline Insurance Group</div>
+  <nav>
+    <a href="index.html" class="active">Log a Sale</a>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="verify.html">Verify</a>
+    <a href="report.html">Daily Report</a>
+    <a href="settings.html">Settings</a>
+  </nav>
+</header>
+
+<div class="container" style="max-width:520px;">
+  <div class="card">
+    <h1>Log a policy you just sold</h1>
+    <p class="subtle">Enter this the moment you bind the policy — don't wait for it to show up in the AMS. That way we know it was sold today, not whenever the effective date lands.</p>
+
+    <form id="saleForm">
+      <label for="dateSold">Date sold</label>
+      <input type="date" id="dateSold" required />
+
+      <label for="agent">Agent</label>
+      <select id="agent" required></select>
+
+      <label for="carrier">Carrier</label>
+      <select id="carrier" required></select>
+
+      <label for="policyType">Line of business</label>
+      <select id="policyType" required></select>
+
+      <label for="newOrRenewal">New or renewal</label>
+      <select id="newOrRenewal" required>
+        <option value="new" selected>New business</option>
+        <option value="renewal">Renewal</option>
+      </select>
+
+      <label for="premium">Annual premium ($)</label>
+      <input type="number" id="premium" min="0" step="0.01" placeholder="1250.00" required />
+
+      <label style="display:flex; align-items:center; gap:8px; margin-top:16px; font-weight:600;">
+        <input type="checkbox" id="bundled" style="width:auto;" />
+        This policy is bundled with another line (e.g. home + auto)
+      </label>
+
+      <label for="clientName">Client name <span style="font-weight:400;">(optional)</span></label>
+      <input type="text" id="clientName" placeholder="Jane Smith" />
+
+      <label for="policyNumber">Policy # <span style="font-weight:400;">(optional, add later once AMS assigns it)</span></label>
+      <input type="text" id="policyNumber" placeholder="e.g. TRV-00123456" />
+
+      <label for="document">Attach the policy application or declarations page</label>
+      <input type="file" id="document" accept=".pdf,.png,.jpg,.jpeg,.heic,.heif" required />
+      <p class="subtle" style="margin:6px 0 0;">Required — this is what gets checked to confirm the carrier, premium, and that the policy actually bound.</p>
+
+      <label for="pin">PIN</label>
+      <input type="password" id="pin" inputmode="numeric" required />
+
+      <button class="primary" type="submit" id="submitBtn">Log this sale</button>
+      <div class="msg" id="formMsg"></div>
+    </form>
+  </div>
+</div>
+
+<script src="app-common.js"></script>
+<script>
+async function init() {
+  const config = await fetchConfig();
+  document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
+
+  const agentSel = document.getElementById('agent');
+  (config.agents || []).forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a; opt.textContent = a;
+    agentSel.appendChild(opt);
+  });
+
+  const carrierSel = document.getElementById('carrier');
+  (config.carriers || []).forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.name; opt.textContent = c.name;
+    carrierSel.appendChild(opt);
+  });
+
+  window.__carriers = config.carriers || [];
+  carrierSel.addEventListener('change', populatePolicyTypes);
+  populatePolicyTypes();
+
+  document.getElementById('dateSold').value = todayLocalISO();
+  const savedPin = localStorage.getItem('northline_pin');
+  if (savedPin) document.getElementById('pin').value = savedPin;
+}
+
+function populatePolicyTypes() {
+  const carrierName = document.getElementById('carrier').value;
+  const carrier = (window.__carriers || []).find(c => c.name === carrierName);
+  const lines = (carrier && Array.isArray(carrier.lines)) ? carrier.lines.map(l => l.name) : [];
+  const sel = document.getElementById('policyType');
+  const previous = sel.value;
+  sel.innerHTML = '';
+  lines.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  if (lines.includes(previous)) sel.value = previous;
+}
+
+document.getElementById('saleForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('formMsg');
+  const btn = document.getElementById('submitBtn');
+  msg.className = 'msg';
+  msg.textContent = '';
+
+  const pin = document.getElementById('pin').value;
+  const fileInput = document.getElementById('document');
+  const carrier = document.getElementById('carrier').value;
+  const premium = document.getElementById('premium').value;
+
+  if (!fileInput.files.length) {
+    msg.className = 'msg error';
+    msg.textContent = 'Please attach the policy application or declarations page.';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('dateSold', document.getElementById('dateSold').value);
+  formData.append('agent', document.getElementById('agent').value);
+  formData.append('carrier', carrier);
+  formData.append('premium', premium);
+  formData.append('bundled', document.getElementById('bundled').checked);
+  formData.append('policyType', document.getElementById('policyType').value);
+  formData.append('newOrRenewal', document.getElementById('newOrRenewal').value);
+  formData.append('clientName', document.getElementById('clientName').value);
+  formData.append('policyNumber', document.getElementById('policyNumber').value);
+  formData.append('document', fileInput.files[0]);
+
+  btn.disabled = true;
+  btn.textContent = 'Logging…';
+  try {
+    const res = await fetch('/api/sales', {
+      method: 'POST',
+      headers: { 'X-Pin': pin }, // no Content-Type — browser sets the multipart boundary
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+
+    localStorage.setItem('northline_pin', pin);
+    msg.className = 'msg success';
+    msg.textContent = `Logged: ${carrier} — $${Number(premium).toLocaleString()} premium. It'll show as "pending" on the dashboard until reviewed against your attachment.`;
+    document.getElementById('premium').value = '';
+    document.getElementById('bundled').checked = false;
+    document.getElementById('newOrRenewal').value = 'new';
+    document.getElementById('clientName').value = '';
+    document.getElementById('policyNumber').value = '';
+    document.getElementById('document').value = '';
+    document.getElementById('dateSold').value = todayLocalISO();
+  } catch (err) {
+    msg.className = 'msg error';
+    msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Log this sale';
+  }
+});
+
+init();
+</script>
+</body>
+</html>
