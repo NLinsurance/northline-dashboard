@@ -620,6 +620,31 @@ app.get('/api/report', (req, res) => {
 // set up "Post to a channel when a webhook request is received", generate its
 // schema from a sample body of {"text":"sample"}, then map the `text` field
 // into a "Post message in a channel" action (as plain Text, not Adaptive Card).
+// Teams' current "Workflows" incoming webhook expects an Adaptive Card
+// payload (the older plain {"text": "..."} shape used by the legacy Office
+// 365 Connector gets rejected). Render one TextBlock per line so the report
+// keeps its line breaks; bold the first line as a title.
+function buildTeamsAdaptiveCard(text) {
+  const lines = text.split('\n');
+  // This Teams "Workflows" webhook posts the request body directly as an
+  // Adaptive Card (via its own "Post card in a chat or channel" step) — it
+  // does NOT want the {"type":"message","attachments":[...]} bot-framework
+  // envelope. The card object itself must be the top-level JSON body.
+  return {
+    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+    type: 'AdaptiveCard',
+    version: '1.4',
+    body: lines.map((line, i) => ({
+      type: 'TextBlock',
+      text: line.length ? line : ' ',
+      wrap: true,
+      weight: i === 0 ? 'bolder' : 'default',
+      size: i === 0 ? 'medium' : 'default',
+      spacing: line.length ? 'small' : 'none'
+    }))
+  };
+}
+
 async function postReportToTeams(mode) {
   const config = loadConfig();
   if (!config.teamsWebhookUrl) return { skipped: true, reason: 'No Teams webhook URL configured' };
@@ -631,7 +656,7 @@ async function postReportToTeams(mode) {
   const resp = await fetch(config.teamsWebhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: report.text })
+    body: JSON.stringify(buildTeamsAdaptiveCard(report.text))
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
