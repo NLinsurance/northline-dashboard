@@ -71,11 +71,29 @@
     <label for="agencyName">Agency name</label>
     <input type="text" id="agencyName" />
 
+    <label style="margin-top:24px;">Agency goal <span style="font-weight:400;">(drives the % to goal shown on the Dashboard and in reports)</span></label>
+    <div style="display:flex; gap:10px;">
+      <div style="flex:1;">
+        <label style="margin:0 0 4px; font-weight:400;">Revenue goal ($/month)</label>
+        <input type="number" id="agencyRevenueGoal" min="0" step="1" placeholder="e.g. 12000" />
+      </div>
+      <div style="flex:1;">
+        <label style="margin:0 0 4px; font-weight:400;">Premium goal ($/month)</label>
+        <input type="number" id="agencyPremiumGoal" min="0" step="1" placeholder="e.g. 80000" />
+      </div>
+    </div>
+
     <label>Carriers &amp; commission rates <span style="font-weight:400;">(per line of business, new vs. renewal, monoline vs. bundled)</span></label>
     <div id="carrierRows"></div>
     <button class="secondary" id="addCarrierBtn" type="button" style="margin-top:8px;">+ Add carrier</button>
 
-    <label style="margin-top:24px;">Agents</label>
+    <label style="margin-top:24px;">Agents &amp; goals <span style="font-weight:400;">(optional per-producer Revenue/Premium goal, for their own % to goal)</span></label>
+    <div style="display:flex; gap:8px; margin-top:8px; font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.03em;">
+      <div style="flex:2;">Agent name</div>
+      <div style="flex:1;">Revenue goal $</div>
+      <div style="flex:1;">Premium goal $</div>
+      <div style="width:24px;"></div>
+    </div>
     <div id="agentRows"></div>
     <button class="secondary" id="addAgentBtn" type="button" style="margin-top:8px;">+ Add agent</button>
 
@@ -177,11 +195,13 @@ function carrierCard(c = { name: '', notes: '', lines: [] }) {
   return card;
 }
 
-function agentRow(name = '') {
+function agentRow(name = '', goals = {}) {
   const row = document.createElement('div');
   row.style.cssText = 'display:flex; gap:8px; margin-top:8px; align-items:center;';
   row.innerHTML = `
-    <input type="text" placeholder="Agent name" value="${name}" class="agent-name" style="flex:1;" />
+    <input type="text" placeholder="Agent name" value="${esc(name)}" class="agent-name" style="flex:2;" />
+    <input type="number" min="0" step="1" placeholder="e.g. 3000" value="${goals.revenueGoal ?? ''}" class="agent-revenue-goal" style="flex:1;" />
+    <input type="number" min="0" step="1" placeholder="e.g. 20000" value="${goals.premiumGoal ?? ''}" class="agent-premium-goal" style="flex:1;" />
     <button class="icon-btn" title="Remove">✕</button>
   `;
   row.querySelector('.icon-btn').addEventListener('click', () => row.remove());
@@ -203,12 +223,14 @@ async function init() {
   config = await fetchConfig();
   document.getElementById('brandName').textContent = config.agencyName || 'Policy Dashboard';
   document.getElementById('agencyName').value = config.agencyName || '';
+  document.getElementById('agencyRevenueGoal').value = config.agencyGoal?.revenueGoal ?? '';
+  document.getElementById('agencyPremiumGoal').value = config.agencyGoal?.premiumGoal ?? '';
 
   const carrierWrap = document.getElementById('carrierRows');
   (config.carriers || []).forEach(c => carrierWrap.appendChild(carrierCard(c)));
 
   const agentWrap = document.getElementById('agentRows');
-  (config.agents || []).forEach(a => agentWrap.appendChild(agentRow(a)));
+  (config.agents || []).forEach(a => agentWrap.appendChild(agentRow(a, (config.agentGoals || {})[a] || {})));
 
   const holidayWrap = document.getElementById('holidayRows');
   (config.holidays || []).forEach(h => holidayWrap.appendChild(holidayRow(h)));
@@ -258,18 +280,36 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     };
   }).filter(c => c.name);
 
-  const agents = Array.from(document.querySelectorAll('#agentRows > div')).map(row =>
-    row.querySelector('.agent-name').value.trim()
-  ).filter(Boolean);
+  const agentGoals = {};
+  const agents = Array.from(document.querySelectorAll('#agentRows > div')).map(row => {
+    const name = row.querySelector('.agent-name').value.trim();
+    if (name) {
+      const revenueGoal = row.querySelector('.agent-revenue-goal').value;
+      const premiumGoal = row.querySelector('.agent-premium-goal').value;
+      agentGoals[name] = {
+        revenueGoal: revenueGoal !== '' ? Number(revenueGoal) : null,
+        premiumGoal: premiumGoal !== '' ? Number(premiumGoal) : null
+      };
+    }
+    return name;
+  }).filter(Boolean);
 
   const holidays = Array.from(document.querySelectorAll('#holidayRows > div')).map(row =>
     row.querySelector('.holiday-date').value
   ).filter(Boolean);
 
+  const agencyRevenueGoal = document.getElementById('agencyRevenueGoal').value;
+  const agencyPremiumGoal = document.getElementById('agencyPremiumGoal').value;
+
   const body = {
     agencyName: document.getElementById('agencyName').value.trim(),
+    agencyGoal: {
+      revenueGoal: agencyRevenueGoal !== '' ? Number(agencyRevenueGoal) : null,
+      premiumGoal: agencyPremiumGoal !== '' ? Number(agencyPremiumGoal) : null
+    },
     carriers,
     agents,
+    agentGoals,
     holidays,
     pin: currentPin
   };
